@@ -1,0 +1,11 @@
+Build SU2:
+1. ./meson.py build --prefix=/home/..../myBranch/SU2
+2. sudo ./ninja -C build install
+
+Dev mode:
+1. sudo ./meson.py build --buidtype=debug --reconfigure
+2. sudo ./ninja -C build install
+
+Release mode:
+1. sudo ./meson.py build --buidtype=release --reconfigure
+2. sudo ./ninja -C build install
