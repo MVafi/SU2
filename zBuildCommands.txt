@@ -3,9 +3,9 @@ Build SU2:
 2. sudo ./ninja -C build install
 
 Dev mode:
-1. sudo ./meson.py build --buidtype=debug --reconfigure
+1. sudo ./meson.py build --reconfigure --buildtype=debug
 2. sudo ./ninja -C build install
 
 Release mode:
-1. sudo ./meson.py build --buidtype=release --reconfigure
+1. sudo ./meson.py build --reconfigure --buidtype=release 
 2. sudo ./ninja -C build install

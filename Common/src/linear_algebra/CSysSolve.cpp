@@ -346,6 +346,8 @@ unsigned long CSysSolve<ScalarType>::FGMRES_LinSolver(const CSysVector<ScalarTyp
 
   /*---  Check the subspace size ---*/
 
+  cout << "------------------------------------------------------------------------------------FMGRES-------------" << endl;
+
   if (m < 1) {
     SU2_MPI::Error("Number of linear solver iterations must be greater than 0.", CURRENT_FUNCTION);
   }
