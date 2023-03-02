@@ -236,11 +236,16 @@ void CNewtonIntegration::MultiGrid_Iteration(CGeometry ****geometry_, CSolver **
   else {
     ComputeFinDiffStep();
 
-    cout << "------------------------------------------------------------------------------------FMGRES from NK-------------" << endl;
+    cout << "------------------------------------------------------------------------------------ NK Iteration -------------" << endl;
 
     eps *= toleranceFactor;
-    iter = LinSolver.FGMRES_LinSolver(LinSysRes, linSysSol, CMatrixFreeProductWrapper(this),
+    // iter = LinSolver.FGMRES_LinSolver(LinSysRes, linSysSol, CMatrixFreeProductWrapper(this),
+    //                                   CPreconditionerWrapper(this), eps, iter, eps, false, config);
+
+    /*--- Use GMRES instead of FGMRES. ---*/
+    iter = LinSolver.GMRES_LinSolver(LinSysRes, linSysSol, CMatrixFreeProductWrapper(this),
                                       CPreconditionerWrapper(this), eps, iter, eps, false, config);
+    
     /*--- Scale back the residual to trick the CFL adaptation. ---*/
     eps /= toleranceFactor;
   }

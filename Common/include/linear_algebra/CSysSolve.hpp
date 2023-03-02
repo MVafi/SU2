@@ -330,6 +330,13 @@ public:
                                   ScalarType & residual, bool monitoring, const CConfig *config);
 
   /*!
+   * \brief Generalized Minimal Residual method. (not yet a config option)
+   */
+  unsigned long GMRES_LinSolver(const VectorType & b, VectorType & x, const ProductType & mat_vec,
+                                const PrecondType & precond, ScalarType tol, unsigned long m,
+                                ScalarType & residual, bool monitoring, const CConfig *config) const;
+
+  /*!
    * \brief Biconjugate Gradient Stabilized Method (BCGSTAB)
    * \param[in] b - the right hand size vector
    * \param[in,out] x - on entry the intial guess, on exit the solution

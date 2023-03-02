@@ -346,7 +346,7 @@ unsigned long CSysSolve<ScalarType>::FGMRES_LinSolver(const CSysVector<ScalarTyp
 
   /*---  Check the subspace size ---*/
 
-  cout << "------------------------------------------------------------------------------------FMGRES-------------" << endl;
+  cout << "------------------------------------------------------------------------------------FGMRES-------------" << endl;
 
   if (m < 1) {
     SU2_MPI::Error("Number of linear solver iterations must be greater than 0.", CURRENT_FUNCTION);
@@ -471,6 +471,187 @@ unsigned long CSysSolve<ScalarType>::FGMRES_LinSolver(const CSysVector<ScalarTyp
     if ((((monitoring) && (master)) && ((i+1) % monitorFreq == 0)) && (master))
       WriteHistory(i+1, beta/norm0);
   }
+
+  /*---  Solve the least-squares system and update solution ---*/
+
+  SolveReduced(i, H, g, y);
+
+  const auto& basis = flexible? Z : W;
+
+  for (unsigned long k = 0; k < i; k++) {
+    x += y[k] * basis[k];
+  }
+
+  /*---  Recalculate final (neg.) residual (this should be optional) ---*/
+
+  if ((monitoring) && (config->GetComm_Level() == COMM_FULL)) {
+
+    if (master) WriteFinalResidual("FGMRES", i, beta/norm0);
+
+    if (recomputeRes) {
+      mat_vec(x, W[0]);
+      W[0] -= b;
+      ScalarType res = W[0].norm();
+
+      if (fabs(res - beta) > tol*10) {
+        if (master) {
+          WriteWarning(beta, res, tol);
+        }
+      }
+    }
+  }
+
+  residual = beta/norm0;
+  return i;
+
+}
+
+template<class ScalarType>
+unsigned long CSysSolve<ScalarType>::GMRES_LinSolver(const CSysVector<ScalarType> & b, CSysVector<ScalarType> & x,
+                                                      const CMatrixVectorProduct<ScalarType> & mat_vec, const CPreconditioner<ScalarType> & precond,
+                                                      ScalarType tol, unsigned long m, ScalarType & residual, bool monitoring, const CConfig *config) const {
+
+  const bool master = (SU2_MPI::GetRank() == MASTER_NODE) && (omp_get_thread_num() == 0);
+  // const bool flexible = !precond.IsIdentity(); //Check if the precond is not an identity matrix (true if not an identity matrix)
+  const bool flexible = 0; //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< no preconditioning
+  
+
+  cout << "------------------------------------------------------------------------------------GMRES output-------------" << endl;
+  cout << "flexible?" << flexible << endl;
+
+  /*---  Check the subspace size ---*/
+
+  if (m < 1) {
+    SU2_MPI::Error("Number of linear solver iterations must be greater than 0.", CURRENT_FUNCTION);
+  }
+
+  if (m > 5000) {
+    SU2_MPI::Error("GMRES subspace is too large.", CURRENT_FUNCTION);
+  }
+
+  /*--- Allocate if not allocated yet ---*/
+
+  if (W.size() <= m || (flexible && Z.size() <= m)) {
+    BEGIN_SU2_OMP_SAFE_GLOBAL_ACCESS
+    {
+      W.resize(m+1); //Resize W to be equal to k + 1 by ....??
+      for (auto& w : W) w.Initialize(x.GetNBlk(), x.GetNBlkDomain(), x.GetNVar(), nullptr);
+      if (flexible) {
+        Z.resize(m+1);
+        for (auto& z : Z) z.Initialize(x.GetNBlk(), x.GetNBlkDomain(), x.GetNVar(), nullptr);
+      }
+    }
+    END_SU2_OMP_SAFE_GLOBAL_ACCESS
+  }
+
+  /*--- Define various arrays. In parallel, each thread of each rank has and works
+   on its own thread, since calculations on these arrays are based on dot products
+   (reduced across all threads and ranks) all threads do the same computations. ---*/
+
+  su2vector<ScalarType> g(m+1), sn(m+1), cs(m+1), y(m);
+  g = ScalarType(0);
+  sn = ScalarType(0);
+  cs = ScalarType(0);
+  y = ScalarType(0);
+  su2matrix<ScalarType> H(m+1, m);
+  H = ScalarType(0);
+
+  /*--- Calculate the norm of the rhs vector. ---*/ //*
+
+  ScalarType norm0 = b.norm();            //Initial l2-norm of b
+
+
+  /*--- Calculate the initial residual (actually the negative residual) and compute its norm. ---*/ //*
+
+  if (!xIsZero) {
+    mat_vec(x, W[0]);                     //Calculate matrix vector product between inital guess and ??preconditioned Coefficient matrix A??
+    W[0] -= b;                            //W is the residual matrix
+  }
+  else {
+    W[0] = -b;                            //Initial residual is equal to -b as inital guess is equal to 0
+  }
+
+  ScalarType beta = W[0].norm();          //l2-norm of the r0 
+
+  /*--- Set the norm to the initial initial residual value ---*/ //?
+
+  if (tol_type == LinearToleranceType::RELATIVE) norm0 = beta; // ??if statement??
+
+  /*--- Check if system is already solved by initial guess ---*/ //*
+
+  if ((beta < tol*norm0) || (beta < eps)) {                             //check if residual < tol OR l2-norm residual < ??eps?? 
+
+    if (master) cout << "CSysSolve::GMRES(): system solved by initial guess." << endl;
+    residual = beta;
+    return 0;
+  }
+
+  /*--- Normalize residual to get w_{0} (the negative sign is because w[0] holds the negative residual, as mentioned above). ---*/ //*
+
+  W[0] /= -beta;                          //Devide residual by l2-norm of residual, obtaining first column of krylov space
+
+  /*--- Initialize the RHS of the reduced system ---*/ //!
+
+  g[0] = beta;
+
+  /*--- Output header information including initial residual ---*/ //? some output?
+
+  unsigned long i = 0;
+  if ((monitoring) && (master)) {
+    WriteHeader("GMRES", tol, beta);
+    WriteHistory(i, beta/norm0);
+  }
+
+  /*---  Loop over all search directions ---*/ //*
+
+  for (i = 0; i < m; i++) {               //Iterate over whole krylov size
+
+    /*---  Check if solution has converged ---*/ //*
+
+    if (beta < tol*norm0) break;          //check if residual < tol
+
+    // cout << "flexible:" << flexible << endl;
+
+    if (flexible) {                       //! should probably be 0 for GMRES, actually this might be fine, but the preconditioner should be fixed
+      /*---  Precondition the CSysVector w[i] and store result in z[i] ---*/
+      cout << "We are preconditioning" << endl;
+
+      precond(W[i], Z[i]);
+
+      /*---  Add to Krylov subspace ---*/
+
+      mat_vec(Z[i], W[i+1]);
+    }
+    else {                                //?
+      cout << "We are NOT preconditioning" << endl;
+      /*---  Add to Krylov subspace ---*/
+
+      mat_vec(W[i], W[i+1]);              //Vector W[0] * matrix W[i+1] -> vector W[i+1]
+    }
+
+    /*---  Modified Gram-Schmidt orthogonalization ---*/ //*
+
+    ModGramSchmidt(i, H, W);              //Gives Hessenberg matrix, W is the orthogonalized Krylov space 
+
+    /*---  Apply old Givens rotations to new column of the Hessenberg matrix then generate the new Givens rotation matrix and apply it to the last two elements of H[:][i] and g ---*/
+                                                    //!WHY does this precondition or so??? flexible Arnoldi process??
+    for (unsigned long k = 0; k < i; k++)
+      ApplyGivens(sn[k], cs[k], H[k][i], H[k+1][i]);
+    GenerateGivens(H[i][i], H[i+1][i], sn[i], cs[i]);
+    ApplyGivens(sn[i], cs[i], g[i], g[i+1]);
+
+    /*---  Set Beta for next convergence check ---*/ //!
+
+    beta = fabs(g[i+1]);                  //^Absolute value of hessenberg matrix???
+                                          //^beta = l2-norm of the residual, where the hessenberg matrix is used for the residual
+
+    /*---  Output the relative residual if necessary ---*/ //*
+
+    if ((((monitoring) && (master)) && ((i+1) % monitorFreq == 0)) && (master))
+      WriteHistory(i+1, beta/norm0);
+  }
+
+  //! Currently the residual of the arnoldi loop is checked with respect to tolerance
 
   /*---  Solve the least-squares system and update solution ---*/
 
