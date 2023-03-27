@@ -440,7 +440,7 @@ unsigned long CSysSolve<ScalarType>::FGMRES_LinSolver(const CSysVector<ScalarTyp
     if (flexible) {
       /*---  Precondition the CSysVector w[i] and store result in z[i] ---*/
 
-      precond(W[i], Z[i]);
+      precond(W[i], Z[i]); //Currently done every loop with a different prec???, should be the same prec...
 
       /*---  Add to Krylov subspace ---*/
 
@@ -476,9 +476,9 @@ unsigned long CSysSolve<ScalarType>::FGMRES_LinSolver(const CSysVector<ScalarTyp
 
   SolveReduced(i, H, g, y);
 
-  const auto& basis = flexible? Z : W;
+  const auto& basis = flexible? Z : W;     
 
-  for (unsigned long k = 0; k < i; k++) {
+  for (unsigned long k = 0; k < i; k++) { 
     x += y[k] * basis[k];
   }
 
@@ -506,18 +506,19 @@ unsigned long CSysSolve<ScalarType>::FGMRES_LinSolver(const CSysVector<ScalarTyp
 
 }
 
+// GMRES with right preconditioner
 template<class ScalarType>
 unsigned long CSysSolve<ScalarType>::GMRES_LinSolver(const CSysVector<ScalarType> & b, CSysVector<ScalarType> & x,
                                                       const CMatrixVectorProduct<ScalarType> & mat_vec, const CPreconditioner<ScalarType> & precond,
                                                       ScalarType tol, unsigned long m, ScalarType & residual, bool monitoring, const CConfig *config) const {
 
   const bool master = (SU2_MPI::GetRank() == MASTER_NODE) && (omp_get_thread_num() == 0);
-  // const bool flexible = !precond.IsIdentity(); //Check if the precond is not an identity matrix (true if not an identity matrix)
-  const bool flexible = 0; //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< no preconditioning
+  const bool flexible = !precond.IsIdentity(); //Check if the precond is not an identity matrix (true if not an identity matrix)
+  // const bool flexible = 0; //<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< no preconditioning
   
 
   cout << "------------------------------------------------------------------------------------GMRES output-------------" << endl;
-  cout << "flexible?" << flexible << endl;
+  // cout << "flexible?" << flexible << endl;
 
   /*---  Check the subspace size ---*/
 
@@ -563,9 +564,11 @@ unsigned long CSysSolve<ScalarType>::GMRES_LinSolver(const CSysVector<ScalarType
 
   /*--- Calculate the initial residual (actually the negative residual) and compute its norm. ---*/ //*
 
+  //Mat_vec should contain the Jacobian matrix here
+
   if (!xIsZero) {
-    mat_vec(x, W[0]);                     //Calculate matrix vector product between inital guess and ??preconditioned Coefficient matrix A??
-    W[0] -= b;                            //W is the residual matrix
+    mat_vec(x, W[0]);                     //Calculate matrix vector product between Jacobian and X, store in W[0]
+    W[0] -= b;                            //W is the residual vector
   }
   else {
     W[0] = -b;                            //Initial residual is equal to -b as inital guess is equal to 0
@@ -588,6 +591,7 @@ unsigned long CSysSolve<ScalarType>::GMRES_LinSolver(const CSysVector<ScalarType
 
   /*--- Normalize residual to get w_{0} (the negative sign is because w[0] holds the negative residual, as mentioned above). ---*/ //*
 
+  //* v0 = r0/beta ----------> W has been initialized 
   W[0] /= -beta;                          //Devide residual by l2-norm of residual, obtaining first column of krylov space
 
   /*--- Initialize the RHS of the reduced system ---*/ //!
@@ -616,17 +620,17 @@ unsigned long CSysSolve<ScalarType>::GMRES_LinSolver(const CSysVector<ScalarType
       /*---  Precondition the CSysVector w[i] and store result in z[i] ---*/
       cout << "We are preconditioning" << endl;
 
-      precond(W[i], Z[i]);
+      precond(W[i], Z[i]);                // prec V, ---> should be M^-1 instead of Mj^-1
 
       /*---  Add to Krylov subspace ---*/
 
-      mat_vec(Z[i], W[i+1]);
+      mat_vec(Z[i], W[i+1]);              // Jaocobian * vector Z[i] -> stored in W[i+i]      <<==>> A * (Mj^(-1??) * v)
     }
     else {                                //?
       cout << "We are NOT preconditioning" << endl;
       /*---  Add to Krylov subspace ---*/
 
-      mat_vec(W[i], W[i+1]);              //Vector W[0] * matrix W[i+1] -> vector W[i+1]
+      mat_vec(W[i], W[i+1]);              //Vector Jacobian * vector W[i] -> vector W[i+1]
     }
 
     /*---  Modified Gram-Schmidt orthogonalization ---*/ //*
@@ -656,12 +660,12 @@ unsigned long CSysSolve<ScalarType>::GMRES_LinSolver(const CSysVector<ScalarType
   /*---  Solve the least-squares system and update solution ---*/
 
   SolveReduced(i, H, g, y);
+ 
+  const auto& basis = flexible? Z : W;      //Initialize basis either with Z or W
 
-  const auto& basis = flexible? Z : W;
-
-  for (unsigned long k = 0; k < i; k++) {
-    x += y[k] * basis[k];
-  }
+  for (unsigned long k = 0; k < i; k++) {   // Prec GMRES basis = M^-1 * Vm , Vm = r/norm r 
+    x += y[k] * basis[k];                   // ----> basis becomes Z, where Z = prec * W[i] -->> is W[i] = r/norm r --> ja ----->> W[] == V
+  }                                         // >>>>> DUS prec should be the same prec for every iteration
 
   /*---  Recalculate final (neg.) residual (this should be optional) ---*/
 
@@ -1071,6 +1075,8 @@ unsigned long CSysSolve<ScalarType>::Solve(CSysMatrix<ScalarType> & Jacobian, co
 
   /*--- Build preconditioner. ---*/
 
+  cout << "------------- SOLVE BUILD PREC -------------" << endl;
+
   precond->Build();
 
   /*--- Solve system. ---*/
@@ -1083,6 +1089,7 @@ unsigned long CSysSolve<ScalarType>::Solve(CSysMatrix<ScalarType> & Jacobian, co
       IterLinSol = BCGSTAB_LinSolver(*LinSysRes_ptr, *LinSysSol_ptr, mat_vec, *precond, SolverTol, MaxIter, residual, ScreenOutput, config);
       break;
     case FGMRES:
+      cout << "------------- SOLVE call FGMRES -------------" << endl;
       IterLinSol = FGMRES_LinSolver(*LinSysRes_ptr, *LinSysSol_ptr, mat_vec, *precond, SolverTol, MaxIter, residual, ScreenOutput, config);
       break;
     case RESTARTED_FGMRES:

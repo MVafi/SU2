@@ -168,6 +168,9 @@ void CNewtonIntegration::ComputeFinDiffStep() {
 void CNewtonIntegration::MultiGrid_Iteration(CGeometry ****geometry_, CSolver *****solvers_, CNumerics ******numerics_,
                                              CConfig **config_, unsigned short EqSystem, unsigned short iZone,
                                              unsigned short iInst) {
+
+  cout << "------------- NK Iteration -------------" << endl;
+
   config = config_[iZone];
   solvers = solvers_[iZone][iInst][MESH_0];
   geometry = geometry_[iZone][iInst][MESH_0];
@@ -187,9 +190,22 @@ void CNewtonIntegration::MultiGrid_Iteration(CGeometry ****geometry_, CSolver **
 
   /*--- Compute the approximate Jacobian for preconditioning. ---*/
 
-  solvers[FLOW_SOL]->PrepareImplicitIteration(geometry, solvers, config);
+  solvers[FLOW_SOL]->PrepareImplicitIteration(geometry, solvers, config); //
 
-  if (preconditioner) preconditioner->Build();
+
+  cout << "------------- NK BUILD PREC -------------" << endl;
+  cout << preconditionerBuild << endl;
+  
+  if (preconditioner && !preconditionerBuild) { 
+    cout << "------------- hier is hie -------------" << endl;
+    preconditionerBuild = true;
+    preconditioner->Build(); // <<------------------------------- build prec for first time
+  } else {
+    cout << "-----------------Building no new prec------------------------" << endl;
+  }
+
+  cout << preconditionerBuild << endl;
+  cout << "-----------------------------------------" << endl;
 
   SU2_OMP_FOR_STAT(omp_chunk_size)
   for (auto i = 0ul; i < LinSysRes.GetNElmDomain(); ++i)
@@ -236,15 +252,13 @@ void CNewtonIntegration::MultiGrid_Iteration(CGeometry ****geometry_, CSolver **
   else {
     ComputeFinDiffStep();
 
-    cout << "------------------------------------------------------------------------------------ NK Iteration -------------" << endl;
-
     eps *= toleranceFactor;
-    // iter = LinSolver.FGMRES_LinSolver(LinSysRes, linSysSol, CMatrixFreeProductWrapper(this),
-    //                                   CPreconditionerWrapper(this), eps, iter, eps, false, config);
+    iter = LinSolver.FGMRES_LinSolver(LinSysRes, linSysSol, CMatrixFreeProductWrapper(this),
+                                      CPreconditionerWrapper(this), eps, iter, eps, false, config);
 
     /*--- Use GMRES instead of FGMRES. ---*/
-    iter = LinSolver.GMRES_LinSolver(LinSysRes, linSysSol, CMatrixFreeProductWrapper(this),
-                                      CPreconditionerWrapper(this), eps, iter, eps, false, config);
+    // iter = LinSolver.GMRES_LinSolver(LinSysRes, linSysSol, CMatrixFreeProductWrapper(this),
+    //                                   CPreconditionerWrapper(this), eps, iter, eps, false, config);
     
     /*--- Scale back the residual to trick the CFL adaptation. ---*/
     eps /= toleranceFactor;
@@ -329,14 +343,14 @@ void CNewtonIntegration::MatrixFreeProduct(const CSysVector<Scalar>& u, CSysVect
 void CNewtonIntegration::Preconditioner(const CSysVector<Scalar>& u, CSysVector<Scalar>& v) const {
 
   if (preconditioner) {
-    Scalar eps = SU2_TYPE::GetValue(precondTol);
-    Preconditioner_impl(u, v, precondIters, eps);
+    Scalar eps = SU2_TYPE::GetValue(precondTol);      //Get tol??
+    Preconditioner_impl(u, v, precondIters, eps);     //Run this function
   }
   else {
     /*--- Approximate diagonal preconditioner. ---*/
 
     const bool dt1st = (config->GetTime_Marching() == TIME_MARCHING::DT_STEPPING_1ST);
-    const bool dt2nd = (config->GetTime_Marching() == TIME_MARCHING::DT_STEPPING_2ND);
+    const bool dt2nd = (config->GetTime_Marching() == TIME_MARCHING::DT_STEPPING_2ND);  
     const su2double dt = config->GetDelta_UnstTimeND() * (dt1st + 1.5 * dt2nd);
 
     SU2_OMP_FOR_STAT(omp_chunk_size)

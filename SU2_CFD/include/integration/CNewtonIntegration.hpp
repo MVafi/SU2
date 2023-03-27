@@ -121,6 +121,11 @@ private:
     END_CNEWTON_PARFOR
   }
 
+  /*--- Indicate whether the preconditioner was build before, 
+   * during the first nonlinear iteration, allowing Flexible GMRES to 
+   * be converted into fixed right preconditioned GMRES ---*/
+  bool preconditionerBuild = false;
+
   /*--- Preconditioner objects for each active solver. ---*/
   CPreconditioner<MixedScalar>* preconditioner = nullptr;
 
@@ -148,13 +153,19 @@ private:
   template<class T, su2enable_if<std::is_same<T,MixedScalar>::value> = 0>
   inline unsigned long Preconditioner_impl(const CSysVector<T>& u, CSysVector<T>& v,
                                            unsigned long iters, Scalar& eps) const {
-    if (iters == 0) {
-      (*preconditioner)(u, v);
+                                            
+    if (iters == 0) { //This function seems to be run everytime for prec
+      cout << "------------------------------------------------------------------------------------Preconditioner_impl (1)-------------" << endl;
+      (*preconditioner)(u, v); // RUN CILUPreconditioner function
       return 0;
     }
+
+    cout << "------------------------------------------------------------------------------------Preconditioner_impl (2)-------------" << endl;
+    //Looks like the Jacobian is here "set" into the product thing....
     auto product = CSysMatrixVectorProduct<MixedScalar>(solvers[FLOW_SOL]->Jacobian, geometry, config);
     v = MixedScalar(0.0);
     MixedScalar eps_t = eps;
+    //And then the Jacobian is inserted here into FGMRES
     iters = solvers[FLOW_SOL]->System.FGMRES_LinSolver(u, v, product, *preconditioner, eps, iters, eps_t, false, config);
     eps = eps_t;
     return iters;

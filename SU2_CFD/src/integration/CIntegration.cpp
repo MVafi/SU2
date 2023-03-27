@@ -205,6 +205,7 @@ void CIntegration::Time_Integration(CGeometry *geometry, CSolver **solver_contai
       solver_container[MainSolver]->ExplicitEuler_Iteration(geometry, solver_container, config);
       break;
     case (EULER_IMPLICIT):
+      cout << "- Doing implicit iteration -" << endl;
       solver_container[MainSolver]->ImplicitEuler_Iteration(geometry, solver_container, config);
       break;
   }

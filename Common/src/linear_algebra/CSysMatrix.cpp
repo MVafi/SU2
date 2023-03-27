@@ -167,7 +167,7 @@ void CSysMatrix<ScalarType>::Initialize(unsigned long npoint, unsigned long npoi
     ptr = MemoryAllocation::aligned_alloc<ScalarType,true>(64, num*sizeof(ScalarType));
   };
 
-  allocAndInit(matrix, nnz*nVar*nEqn);
+  allocAndInit(matrix, nnz*nVar*nEqn); //Allocate and initialize, but no value allocation?
 
   /*--- Preconditioners. ---*/
 
@@ -672,11 +672,13 @@ void CSysMatrix<ScalarType>::BuildILUPreconditioner() {
   /*--- Copy block matrix to compute factorization in-place. ---*/
 
   if (ilu_fill_in == 0) {
+    cout << "------------------------------------------------------------------------------------REBUILDING ILU PREC-------------" << endl;
     /*--- ILU0, direct copy. ---*/
     SU2_OMP_FOR_STAT(omp_light_size)
-    for (auto iVar = 0ul; iVar < nnz*nVar*nVar; ++iVar)
-      ILU_matrix[iVar] = matrix[iVar];
+    for (auto iVar = 0ul; iVar < nnz*nVar*nVar; ++iVar) //Loops through all the matrix variables
+      ILU_matrix[iVar] = matrix[iVar];                  //The Jacobian (for NK) right?
     END_SU2_OMP_FOR
+    // cout << "--------- ILU loop end ---------" << endl;
   }
   else {
     /*--- ILUn clear the ILU matrix first. ---*/
@@ -792,7 +794,7 @@ void CSysMatrix<ScalarType>::ComputeILUPreconditioner(const CSysVector<ScalarTyp
 
     /*--- Copy vector to then work on prod in place ---*/
 
-    for (auto iVar = begin*nVar; iVar < end*nVar; iVar++)
+    for (auto iVar = begin*nVar; iVar < end*nVar; iVar++) //*Run for every iteration
       prod[iVar] = vec[iVar];
 
     /*--- Forward solve the system using the lower matrix entries that
@@ -803,7 +805,7 @@ void CSysMatrix<ScalarType>::ComputeILUPreconditioner(const CSysVector<ScalarTyp
       for (auto index = row_ptr_ilu[iPoint]; index < dia_ptr_ilu[iPoint]; index++) {
         auto jPoint = col_ind_ilu[index];
         if (jPoint < begin) continue;
-        auto Block_ij = &ILU_matrix[index*nVar*nVar];
+        auto Block_ij = &ILU_matrix[index*nVar*nVar]; 
         MatrixVectorProductSub(Block_ij, &prod[jPoint*nVar], &prod[iPoint*nVar]);
       }
     }

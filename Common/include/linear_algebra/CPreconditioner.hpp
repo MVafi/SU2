@@ -167,6 +167,7 @@ public:
    * \param[out] v - CSysVector that is the result of the preconditioning.
    */
   inline void operator()(const CSysVector<ScalarType> & u, CSysVector<ScalarType> & v) const override {
+    cout << "------------------------------------------------------------------------------------COMPUTE ILU PREC-------------" << endl;
     sparse_matrix.ComputeILUPreconditioner(u, v, geometry, config);
   }
 
@@ -174,6 +175,7 @@ public:
    * \note Request the associated matrix to build the preconditioner.
    */
   inline void Build() override {
+    cout << "------------------------------------------------------------------------------------BUILD ILU PREC-------------" << endl;
     sparse_matrix.BuildILUPreconditioner();
   }
 };
